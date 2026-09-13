@@ -1,0 +1,21 @@
+---
+description: Legal FPL wildcard and transfer solver constraints
+globs: src/optimize/**/*.py,src/solver/**/*.py,tests/optimize/**/*.py
+alwaysApply: false
+---
+
+# Optimizer constraints
+
+Use HiGHS (via `highspy` or PuLP) for squad and transfer solves. The solver is the source of legality, not post-hoc repair.
+
+Always enforce from live settings when possible:
+
+- 15-man squad: 2 GKP, 5 DEF, 5 MID, 3 FWD
+- Max 3 players from one Premier League club
+- Budget in 0.1m units; wildcard uses purchase prices; transfers use purchase price in and **selling price** out
+- Starting XI + bench + captain/vice; valid formation bounds
+- Transfers: `in` count = `out` count; hits = max(0, transfers - free_transfers) * 4
+- Selling price: user keeps half of rises (`transfers_sell_on_fee` = 0.5)
+- Chips are half-season scoped (GW2–19 and GW20–38). Do not spend a chip unless the user asked.
+
+Objective is expected points over a horizon minus hit cost, with optional minutes-risk penalty. Return the solver status, objective, and a human-readable explanation that cites the projection inputs — do not invent extra narrative.

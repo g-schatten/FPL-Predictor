@@ -1,0 +1,14 @@
+---
+description: Leakage-safe FPL feature engineering and snapshot rules
+globs: src/data/**/*.py,src/features/**/*.py,src/models/**/*.py,tests/data/**/*.py,tests/features/**/*.py
+alwaysApply: false
+---
+
+# Data and leakage
+
+- Persist every API pull as a timestamped snapshot. A row is usable for gameweek N only if captured before that GW deadline.
+- Shift all rolling match stats by at least one match within each player. Same-GW `minutes`, `starts`, `goals`, `xG`, `defensive_contribution`, and `total_points` are labels, not features.
+- Treat FPL `ep_this` / `ep_next` and vaastav `xP` as leak-prone. Use them only from pre-deadline snapshots. Missing projection = `-1`, never `0`.
+- Player IDs are not stable across FPL / Understat / FBref / football-data.co.uk. Maintain an explicit mapping table and fail rows that do not join cleanly.
+- Rate-limit `element-summary/{id}/` (hundreds of calls). Cache per run; do not hammer the API.
+- Historical scoring changed in 2025/26 (defensive contribution). Tag seasons with a ruleset id; do not mix eras in one unadjusted target.
