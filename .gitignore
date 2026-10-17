@@ -16,3 +16,4 @@ data/squads/
 *.parquet
 .ruff_cache/
 .vscode/
+.arena/
