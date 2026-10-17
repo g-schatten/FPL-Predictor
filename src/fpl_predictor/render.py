@@ -88,10 +88,11 @@ def print_backtest(summary, per_gw, *, calibration: dict, leakage: dict) -> None
     has_squads = "xi_plus_captain" in summary.columns
     if has_squads:
         table.add_column("XI+C actual pts/GW", justify="right")
+        table.add_column("with autosubs", justify="right")
     for method, row in summary.iterrows():
         cells = [f"{row[c]:.4f}" for c in ("ndcg@10", "ndcg@20", "top20_capture", "mae")]
         if has_squads:
-            cells.append(f"{row['xi_plus_captain']:.1f}")
+            cells += [f"{row['xi_plus_captain']:.1f}", f"{row['squad_autosub']:.1f}"]
         style = "bold green" if str(method).startswith("engine") else ""
         table.add_row(str(method), *cells, style=style)
     console.print()

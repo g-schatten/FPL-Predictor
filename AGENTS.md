@@ -43,7 +43,11 @@ Checked 2026-09-13:
   shrunk toward an FDR prior because `teams[].strength` is null
 - expected goals for and against for that exact fixture, then Poisson tails for clean sheets,
   goals-conceded penalties, saves and the defensive-contribution threshold
-- expected minutes with P(appear) and P(60+) from recent selection plus availability
+- expected minutes with P(appear) and P(60+) from recent selection plus availability; live
+  per-match minutes come from `/event/{gw}/live/`, cached per finished gameweek
+
+The wildcard solver gives bench players a small weight (0.1 outfield, 0.03 keeper) so the
+bench is made of players who actually play. `fpl backtest` scores squads with autosubs.
 
 Do not add "form" or `ep_next` back as the primary signal. Season-long rates beat recency
 weighting and blending recent points made ranking worse — both measured, see [docs/EVAL.md](docs/EVAL.md).

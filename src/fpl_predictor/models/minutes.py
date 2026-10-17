@@ -94,6 +94,8 @@ def minutes_profile(
         return MinutesProfile(expected=0.0, p_appear=0.0, p_long=0.0)
 
     rows = _decayed_history(history)
+    if len(rows) < 3 and not any(minutes > 0 for _, minutes, _ in rows):
+        rows = []  # just registered, no minutes yet: use the signing guess below, not 0
     if rows:
         total_weight = sum(w for w, _, _ in rows)
         start_share = sum(w for w, _, started in rows if started) / total_weight

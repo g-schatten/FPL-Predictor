@@ -8,6 +8,14 @@ from fpl_predictor.data.rules import GameRules
 from fpl_predictor.features.builder import PlayerProjection
 from fpl_predictor.optimize.solver import make_solver, require_optimal
 
+# A bench player only scores when a starter misses the match, so his projection counts at
+# roughly the chance he is called on. open-fpl-solver uses 0.03 for the bench keeper and
+# 0.21 / 0.06 / 0.002 for the outfield slots; one flat outfield weight is enough because the
+# walk-forward sweep in docs/EVAL.md was flat from 0.05 to 0.2. Wildcard only: that is the
+# solve the backtest measures.
+BENCH_GK_WEIGHT = 0.03
+BENCH_WEIGHT = 0.1
+
 
 @dataclass
 class SquadPick:
@@ -80,7 +88,12 @@ def solve_wildcard(
     by_id = {p.player_id: p for p in pool}
 
     problem += pulp.lpSum(
-        start[p.player_id] * p.xpts + captain[p.player_id] * p.xpts for p in pool
+        start[p.player_id] * p.xpts
+        + captain[p.player_id] * p.xpts
+        + (BENCH_GK_WEIGHT if p.element_type == 1 else BENCH_WEIGHT)
+        * p.xpts
+        * (squad[p.player_id] - start[p.player_id])
+        for p in pool
     )
 
     problem += pulp.lpSum(squad[p.player_id] for p in pool) == rules.squad_size

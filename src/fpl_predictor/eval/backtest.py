@@ -25,7 +25,7 @@ from fpl_predictor.models.team_strength import (
     TeamGame,
     build_league_context,
 )
-from fpl_predictor.optimize.wildcard import solve_wildcard
+from fpl_predictor.optimize.wildcard import WildcardPlan, solve_wildcard
 
 POSITION_TO_TYPE = {"GK": 1, "GKP": 1, "DEF": 2, "MID": 3, "FWD": 4}
 MIN_HISTORY_GWS = 3  # a player needs some past before any method can rank them
@@ -67,6 +67,8 @@ class EngineConfig:
 
 def prepare(frame: pd.DataFrame) -> pd.DataFrame:
     """Normalise a vaastav `merged_gw` season into the columns the engine needs."""
+    # 2024-25 and earlier have no defensive_contribution column; a missing column becomes 0.
+    frame = frame.reindex(columns=frame.columns.union(["defensive_contribution"], sort=False))
     out = pd.DataFrame(
         {
             "element": pd.to_numeric(frame["element"], errors="coerce").astype("Int64"),
@@ -403,6 +405,7 @@ def squad_points(state: GameweekState, predicted: np.ndarray, rules: GameRules) 
     grouped = frame.groupby("element").agg(
         predicted=("predicted", "sum"),
         points=("points", "sum"),
+        minutes=("minutes", "sum"),
         value=("value", "max"),
         element_type=("element_type", "first"),
         team=("team", "first"),
@@ -412,6 +415,7 @@ def squad_points(state: GameweekState, predicted: np.ndarray, rules: GameRules) 
         for row in grouped.reset_index().rename(columns={"element": "element"}).itertuples()
     ]
     actual = {int(row.Index): float(row.points) for row in grouped.itertuples()}
+    minutes = {int(row.Index): float(row.minutes) for row in grouped.itertuples()}
     plan = solve_wildcard(pool, rules, time_limit=6)
     starters = [pick for pick in plan.picks if pick.starter]
     captain = max(starters, key=lambda pick: pick.player.xpts)
@@ -419,7 +423,43 @@ def squad_points(state: GameweekState, predicted: np.ndarray, rules: GameRules) 
     return {
         "xi_points": xi,
         "xi_plus_captain": xi + actual.get(captain.player.player_id, 0.0),
+        "squad_autosub": autosub_points(plan, minutes, actual, rules),
     }
+
+
+def autosub_points(
+    plan: WildcardPlan, minutes: dict[int, float], points: dict[int, float], rules: GameRules
+) -> float:
+    """What the 15 really scores: FPL automatic substitutions, then captain or vice doubled.
+
+    A starter with no minutes is replaced by the first bench player who played, in bench
+    order, if the XI still meets every position minimum. Keepers only replace keepers.
+    """
+
+    def played(pick) -> bool:
+        return minutes.get(pick.player.player_id, 0.0) > 0
+
+    xi = list(plan.starters)
+    used: set[int] = set()
+    for out in [pick for pick in plan.starters if not played(pick)]:
+        for sub in plan.bench:
+            if sub.player.player_id in used or not played(sub):
+                continue
+            if (sub.player.element_type == 1) != (out.player.element_type == 1):
+                continue
+            trial = [pick for pick in xi if pick is not out] + [sub]
+            if all(
+                sum(pick.player.element_type == pos for pick in trial) >= rule.min_play
+                for pos, rule in rules.positions.items()
+            ):
+                xi = trial
+                used.add(sub.player.player_id)
+                break
+    captain = next(pick for pick in plan.picks if pick.captain)
+    vice = next(pick for pick in plan.picks if pick.vice)
+    armband = captain if played(captain) else vice if played(vice) else None
+    total = sum(points.get(pick.player.player_id, 0.0) for pick in xi)
+    return total + (points.get(armband.player.player_id, 0.0) if armband else 0.0)
 
 
 def walk_forward(
@@ -472,6 +512,36 @@ def walk_forward(
         .sort_values("ndcg@20", ascending=False)
     )
     return summary, per_gw
+
+
+PAIRED_METRICS = ("ndcg@10", "ndcg@20", "top20_capture", "mae", "xi_plus_captain", "squad_autosub")
+
+
+def paired_report(before: pd.DataFrame, after: pd.DataFrame) -> pd.DataFrame:
+    """after − before, gameweek by gameweek, for every method both runs share.
+
+    Squad points move by whole hauls, so a mean without its standard error over-claims.
+    For mae a negative diff is the improvement.
+    """
+    merged = after.merge(before, on=["gameweek", "method"], suffixes=("", "_before"))
+    rows = []
+    for method, group in merged.groupby("method"):
+        for metric in PAIRED_METRICS:
+            if metric not in group or f"{metric}_before" not in group:
+                continue
+            diff = (group[metric] - group[f"{metric}_before"]).dropna().round(6)  # CSV float noise
+            if len(diff) < 2:
+                continue
+            rows.append(
+                {
+                    "method": method,
+                    "metric": metric,
+                    "diff": diff.mean(),
+                    "se": diff.std(ddof=1) / np.sqrt(len(diff)),
+                    "win/tie/loss": f"{(diff > 0).sum()}/{(diff == 0).sum()}/{(diff < 0).sum()}",
+                }
+            )
+    return pd.DataFrame(rows)
 
 
 def official_ep_leakage(data: pd.DataFrame) -> dict[str, Any]:

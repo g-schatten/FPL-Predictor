@@ -127,8 +127,12 @@ def project_fixture(
 
     threshold = dc_threshold(element_type)
     if threshold and rates.dc90 > 0:
-        expected_actions = rates.dc90 * share
-        breakdown.defensive_contribution = Poisson(expected_actions).p_at_least(threshold) * DC_POINTS
+        # +2 at 10 or 12 actions is a step. Score it on the minutes he plays when he plays, then
+        # weight by P(appear): a threshold applied to average minutes understates the tail.
+        expected_actions = rates.dc90 * min(1.0, share / minutes.p_appear)
+        breakdown.defensive_contribution = (
+            minutes.p_appear * Poisson(expected_actions).p_at_least(threshold) * DC_POINTS
+        )
 
     fixture_bonus = 1.0 + BONUS_FIXTURE_SENSITIVITY * (attack_scale - 1.0)
     breakdown.bonus = rates.bonus90 * share * max(0.5, fixture_bonus)

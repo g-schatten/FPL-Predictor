@@ -141,6 +141,46 @@ def load_current() -> Snapshot:
     return load_snapshot(Path(pointer.read_text(encoding="utf-8").strip()))
 
 
+def event_minutes(payload: dict[str, Any]) -> dict[str, list[int]]:
+    """{player id: minutes in each fixture} from one `/event/{gw}/live/` payload."""
+    return {
+        str(element["id"]): [
+            int(next((s.get("value", 0) for s in fixture.get("stats", []) if s.get("identifier") == "minutes"), 0))
+            for fixture in element.get("explain", [])
+        ]
+        for element in payload.get("elements", [])
+    }
+
+
+def live_histories(client: FplClient, bootstrap: dict[str, Any]) -> dict[str, Any]:
+    """Every player's minutes in every finished match, one request per gameweek.
+
+    Shaped like element-summary `history`, so `minutes_profile` runs the same decayed-history
+    model the backtest scores instead of the season-aggregate fallback. `explain` has one
+    entry per fixture, so a double gameweek gives two rows. Checked gameweeks never change
+    and are cached.
+    """
+    cache = snapshots_dir() / "live"
+    cache.mkdir(exist_ok=True)
+    season = str(bootstrap["events"][0]["deadline_time"])[:4]
+    histories: dict[str, Any] = {}
+    for event in bootstrap.get("events", []):
+        if not event.get("finished"):
+            continue
+        event_id = int(event["id"])
+        path = cache / f"{season}-gw{event_id:02d}.json"
+        try:
+            minutes = _read_json(path)
+        except (OSError, ValueError):  # not cached yet, or a write cut short: fetch again
+            minutes = event_minutes(client.event_live(event_id))
+            if event.get("data_checked"):
+                _write_json(path, minutes)
+        for player_id, per_fixture in minutes.items():
+            rows = histories.setdefault(player_id, {"history": []})["history"]
+            rows.extend({"round": event_id, "minutes": value} for value in per_fixture)
+    return histories
+
+
 def refresh_snapshot(client: FplClient | None = None, *, full: bool = False) -> Snapshot:
     own_client = client is None
     client = client or FplClient()
@@ -155,7 +195,10 @@ def refresh_snapshot(client: FplClient | None = None, *, full: bool = False) -> 
             set_piece_notes = client.set_piece_notes()
         except RuntimeError:
             set_piece_notes = {}
-        histories: dict[str, Any] = {}
+        try:
+            histories: dict[str, Any] = {} if full else live_histories(client, bootstrap)
+        except (RuntimeError, OSError, ValueError):
+            histories = {}  # minutes fall back to season totals, as before
         if full:
             from rich.progress import Progress
 

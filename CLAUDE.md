@@ -18,6 +18,8 @@ fpl transfers --name demo  # needs a saved squad; default name is "default"
 fpl status
 fpl refresh
 fpl backtest --season 2025-26   # walk-forward eval; slow (a few minutes)
+fpl backtest --season 2025-26 --save data/warehouse/ref.csv     # before a change
+fpl backtest --season 2025-26 --compare data/warehouse/ref.csv  # after: paired diff ± se
 python -m pytest -q
 ```
 

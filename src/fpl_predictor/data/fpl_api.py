@@ -56,6 +56,9 @@ class FplClient:
     def element_summary(self, player_id: int) -> dict[str, Any]:
         return self.get_json(f"/element-summary/{player_id}/")
 
+    def event_live(self, event_id: int) -> dict[str, Any]:
+        return self.get_json(f"/event/{event_id}/live/")
+
     def entry(self, manager_id: int) -> dict[str, Any]:
         return self.get_json(f"/entry/{manager_id}/")
 

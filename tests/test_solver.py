@@ -120,3 +120,9 @@ def test_transfers_never_overspend() -> None:
     assert plan.hits <= 1
     assert plan.bank >= -1e-6
     assert len(plan.wildcard.picks) == 15
+
+
+def test_bench_takes_the_best_spare_keeper_when_money_allows() -> None:
+    plan = solve_wildcard(_pool(), _rules())
+    bench_keeper = next(p.player for p in plan.bench if p.player.element_type == 1)
+    assert bench_keeper.xpts == 3.2  # a zero bench weight was indifferent and kept the 1.0 keeper

@@ -105,6 +105,14 @@ def test_defensive_contribution_needs_the_position_threshold() -> None:
     assert 0.0 <= dc_def <= 2.0
 
 
+def test_defensive_contribution_scales_with_the_chance_of_playing() -> None:
+    same = dict(team_id=1, opponent_id=2, home=True)
+    coin_flip = MinutesProfile(expected=45.0, p_appear=0.5, p_long=0.5)  # 90 minutes or none
+    full = project_fixture(_rates(2), FULL_TIME, _league(), **same).defensive_contribution
+    half = project_fixture(_rates(2), coin_flip, _league(), **same).defensive_contribution
+    assert full > 0 and math.isclose(half, 0.5 * full)  # today's code gives far less than half
+
+
 def test_no_minutes_means_no_points() -> None:
     bench = MinutesProfile(expected=0.0, p_appear=0.0, p_long=0.0)
     result = project_fixture(_rates(4), bench, _league(), team_id=1, opponent_id=2, home=True)

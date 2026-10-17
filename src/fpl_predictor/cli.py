@@ -144,12 +144,17 @@ def backtest(
     season: str = typer.Option("2025-26", help="Season of historical gameweeks to walk through."),
     start_gw: int = typer.Option(6, min=2, help="First gameweek to score, after some history exists."),
     squads: bool = typer.Option(True, help="Also solve a legal 15 each GW and count its real points."),
+    save: Optional[str] = typer.Option(None, help="Write the per-gameweek rows to this CSV."),
+    compare: Optional[str] = typer.Option(None, help="Paired diff against a CSV written by --save."),
 ) -> None:
     """Walk-forward test of the projection engine against form and price baselines."""
+    import pandas as pd
+
     from fpl_predictor.data.warehouse import load_season
     from fpl_predictor.eval.backtest import (
         calibration_report,
         official_ep_leakage,
+        paired_report,
         prepare,
         walk_forward,
     )
@@ -162,6 +167,11 @@ def backtest(
     rules = load_current().rules if squads else None
     summary, per_gw = walk_forward(data, start_gw=start_gw, rules=rules)
     print_backtest(summary, per_gw, calibration=calibration_report(data), leakage=official_ep_leakage(data))
+    if save:
+        per_gw.to_csv(save, index=False)
+    if compare:
+        report = paired_report(pd.read_csv(compare), per_gw).round(4).to_string(index=False)
+        console.print(report, soft_wrap=True)
 
 
 @app.command()
