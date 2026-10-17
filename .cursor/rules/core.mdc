@@ -7,10 +7,11 @@ alwaysApply: true
 
 This repo is a local Fantasy Premier League wildcard + transfer tool. Read `AGENTS.md` and `docs/PLAN.md` before writing code.
 
-- The CLI already exists (`fpl refresh`, `fpl wildcard`, `fpl transfers`, `fpl squad`). Extend it; do not start a parallel app.
+- The CLI already exists (`fpl refresh`, `fpl wildcard`, `fpl transfers`, `fpl squad`, `fpl serve`). Extend it; do not start a parallel app.
+- `fpl serve` is the local web UI (`src/fpl_predictor/web/`). Endpoints must call the existing projection/solver functions; no FPL rules, scoring, or player filtering logic in `web/` or in JS.
 - Split **predict** (expected points / minutes) from **optimize** (MILP squad or transfers). Never let an LLM pick the squad.
 - Refresh official FPL data on each run; persist raw snapshots with timestamps. Never train on post-deadline `ep_this` / `ep_next` as a same-GW feature.
 - Read live rules from `bootstrap-static` (`game_settings`, `chips`, `element_types`). Do not hardcode 2024/25 chip or scoring rules.
 - 2026/27 snapshot: £100m, 15-man squad, max 3/club, 2/5/5/3 positions, 1 FT banking to 5, -4 hits, half-profit selling fee, two chip halves (GW1–19 and GW20–38), defensive contribution points.
 - Official FPL `teams[].strength` is currently unusable (null / zeros). Use FDR, Club Elo, and xG for team strength.
-- Prefer small Python packages, pytest, and a CLI. No web app unless requested.
+- Prefer small Python packages, pytest, and a CLI. The only frontend is the local `fpl serve` UI; do not add a hosted app, build step, or JS framework.

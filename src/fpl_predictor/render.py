@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from fpl_predictor.data.snapshots import Snapshot
+from fpl_predictor.explain import build_trust_note
 from fpl_predictor.optimize.transfers import TransferPlan
 from fpl_predictor.optimize.wildcard import WildcardPlan
 from fpl_predictor.squad.store import UserSquad
@@ -74,6 +77,63 @@ def print_squad_plan(plan: WildcardPlan, *, title: str) -> None:
         f"Solver [bold]{plan.status}[/bold]  |  XI+captain horizon xPts {plan.horizon_xpts:.2f}  |  "
         f"bank £{plan.bank:.1f}m"
     )
+
+
+def print_backtest(summary, per_gw, *, calibration: dict, leakage: dict) -> None:
+    """Report a walk-forward run: ranking quality first, then what a solved squad scored."""
+    table = Table(title=f"Walk-forward backtest · {per_gw['gameweek'].nunique()} gameweeks", box=None)
+    table.add_column("method")
+    for column in ("ndcg@10", "ndcg@20", "top20_capture", "mae"):
+        table.add_column(column, justify="right")
+    has_squads = "xi_plus_captain" in summary.columns
+    if has_squads:
+        table.add_column("XI+C actual pts/GW", justify="right")
+    for method, row in summary.iterrows():
+        cells = [f"{row[c]:.4f}" for c in ("ndcg@10", "ndcg@20", "top20_capture", "mae")]
+        if has_squads:
+            cells.append(f"{row['xi_plus_captain']:.1f}")
+        style = "bold green" if str(method).startswith("engine") else ""
+        table.add_row(str(method), *cells, style=style)
+    console.print()
+    console.print(table)
+
+    if calibration:
+        console.print(
+            f"\n[bold]Probability calibration[/bold] (players who played 60+, n={calibration['n']})"
+        )
+        for pos, values in calibration.get("dc_by_position", {}).items():
+            name = {2: "DEF", 3: "MID", 4: "FWD"}.get(pos, str(pos))
+            console.print(
+                f"  defensive contribution {name}: predicted {values['predicted']:.3f} "
+                f"vs actual {values['actual']:.3f}"
+            )
+        console.print(
+            f"  clean sheets: predicted {calibration['cs_predicted_rate']:.3f} "
+            f"vs actual {calibration['cs_actual_rate']:.3f}"
+        )
+
+    if leakage and not leakage.get("usable"):
+        console.print(
+            f"\n[yellow]Official ep_next excluded from this comparison:[/yellow] {leakage.get('reason')} "
+            f"(correlation {leakage.get('correlation_with_actual')})."
+        )
+
+
+def print_trust_note(snapshot: Snapshot, plan: WildcardPlan, *, horizon: int) -> None:
+    note = build_trust_note(snapshot, plan, horizon=horizon)
+    body = Text()
+    body.append("Data: official FPL API at ")
+    body.append(note.pulled_at, style="bold")
+    body.append(f"  ·  GW{note.gameweek or '?'} deadline {note.deadline or 'unknown'}\n")
+    body.append("Legal solver output (")
+    body.append(note.solver_status, style="bold")
+    body.append("): " + "; ".join(note.legality) + ".\n")
+    body.append(f"xPts are expected points for {note.span}, built from ")
+    body.append("; ".join(note.basis) + ".\n")
+    body.append("They are estimates, not guaranteed FPL points.\n")
+    body.append(note.risk_line)
+    console.print()
+    console.print(Panel(body, title="About this prediction", border_style="dim"))
 
 
 def print_transfers(plan: TransferPlan) -> None:

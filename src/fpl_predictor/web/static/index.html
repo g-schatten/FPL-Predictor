@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FPL Predictor</title>
+<link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+<div class="glow" aria-hidden="true"></div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="dot"></span>
+    <div>
+      <h1>FPL Predictor</h1>
+      <p>Live official data, then a solver picks a legal squad.</p>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div id="snapshot-pill" class="pill muted">Loading data…</div>
+    <button id="refresh-btn" class="btn ghost" type="button">Refresh data</button>
+  </div>
+</header>
+
+<main>
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="wildcard" role="tab">Wildcard</button>
+    <button class="tab" data-tab="transfers" role="tab">Transfers</button>
+  </nav>
+
+  <div id="error" class="callout error" hidden></div>
+
+  <!-- Wildcard -->
+  <section id="panel-wildcard" class="panel-group">
+    <div class="controls card">
+      <div class="field">
+        <label for="wc-horizon">Optimise for</label>
+        <select id="wc-horizon">
+          <option value="1" selected>Upcoming GW</option>
+          <option value="2">Next 2 GW</option>
+          <option value="3">Next 3 GW</option>
+          <option value="4">Next 4 GW</option>
+          <option value="5">Next 5 GW</option>
+          <option value="6">Next 6 GW</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="wc-budget">Budget (£m)</label>
+        <input id="wc-budget" type="number" step="0.1" min="50" max="150" value="100.0" />
+      </div>
+      <label class="check">
+        <input id="wc-refresh" type="checkbox" checked />
+        <span>Fetch latest prices &amp; injuries</span>
+      </label>
+      <button id="wc-run" class="btn primary" type="button">Build squad</button>
+    </div>
+
+    <div id="wc-result" class="result" hidden></div>
+    <div id="wc-empty" class="card empty">
+      <h3>Build a squad from scratch</h3>
+        <p>Picks the best legal 15 for the upcoming gameweek: £100.0m budget, max 3 per club, 2 GKP / 5 DEF / 5 MID / 3 FWD. Expected points come from each player's underlying rates and the specific opponent they face, not from last week's score. Injured and unavailable players are excluded.</p>
+    </div>
+  </section>
+
+  <!-- Transfers -->
+  <section id="panel-transfers" class="panel-group" hidden>
+    <div class="controls card stack">
+      <div class="segmented" role="tablist">
+        <button class="seg active" data-mode="entry" type="button">FPL manager ID</button>
+        <button class="seg" data-mode="ids" type="button">Player IDs</button>
+        <button class="seg" data-mode="saved" type="button">Saved squad</button>
+      </div>
+
+      <div class="mode" data-mode-panel="entry">
+        <div class="field grow">
+          <label for="tr-entry">Manager ID</label>
+          <input id="tr-entry" type="number" inputmode="numeric" placeholder="e.g. 1234567" />
+          <small>On fantasy.premierleague.com open <em>Points</em> — the number in the URL.</small>
+        </div>
+      </div>
+
+      <div class="mode" data-mode-panel="ids" hidden>
+        <div class="field grow">
+          <label for="tr-ids">15 player IDs</label>
+          <textarea id="tr-ids" rows="2" placeholder="1, 2, 3, … 15 comma-separated FPL element ids"></textarea>
+        </div>
+      </div>
+
+      <div class="mode" data-mode-panel="saved" hidden>
+        <div class="field grow">
+          <label for="tr-saved">Squad</label>
+          <select id="tr-saved"></select>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="tr-bank">Bank (£m)</label>
+          <input id="tr-bank" type="number" step="0.1" min="0" value="0.0" />
+        </div>
+        <div class="field">
+          <label for="tr-ft">Free transfers</label>
+          <select id="tr-ft">
+            <option value="0">0</option>
+            <option value="1" selected>1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="tr-hits">Max hits (−4 each)</label>
+          <select id="tr-hits">
+            <option value="0">0</option>
+            <option value="1" selected>1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="tr-horizon">Optimise for</label>
+          <select id="tr-horizon">
+            <option value="1" selected>Upcoming GW</option>
+            <option value="2">Next 2 GW</option>
+            <option value="3">Next 3 GW</option>
+            <option value="4">Next 4 GW</option>
+            <option value="5">Next 5 GW</option>
+            <option value="6">Next 6 GW</option>
+          </select>
+        </div>
+        <button id="tr-run" class="btn primary" type="button">Find transfers</button>
+      </div>
+    </div>
+
+    <div id="tr-result" class="result" hidden></div>
+    <div id="tr-empty" class="card empty">
+      <h3>Improve the squad you already own</h3>
+      <p>Respects your bank, free transfers, FPL selling prices, and the −4 point hit. Always compared against doing nothing.</p>
+    </div>
+  </section>
+
+  <footer class="foot">
+    Expected points are model estimates, not guaranteed scores. Not affiliated with the Premier League or FPL.
+  </footer>
+</main>
+
+<div id="busy" class="busy" hidden>
+  <div class="busy-card">
+    <div class="spinner"></div>
+    <p id="busy-text">Working…</p>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -14,6 +14,8 @@ dependencies = [
   "highspy>=1.8",
   "xgboost>=2.1",
   "scikit-learn>=1.5",
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +30,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+fpl_predictor = ["web/static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

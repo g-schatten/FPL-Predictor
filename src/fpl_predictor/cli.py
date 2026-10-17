@@ -11,7 +11,15 @@ from fpl_predictor.models.predict import load_model_adjustments
 from fpl_predictor.models.train import train_points_model
 from fpl_predictor.optimize.transfers import solve_transfers
 from fpl_predictor.optimize.wildcard import solve_wildcard
-from fpl_predictor.render import console, print_saved_squad, print_snapshot, print_squad_plan, print_transfers
+from fpl_predictor.render import (
+    console,
+    print_backtest,
+    print_saved_squad,
+    print_snapshot,
+    print_squad_plan,
+    print_transfers,
+    print_trust_note,
+)
 from fpl_predictor.squad.store import (
     import_public_entry,
     list_squads,
@@ -72,7 +80,9 @@ def status() -> None:
 
 @app.command()
 def wildcard(
-    horizon: int = typer.Option(4, min=1, max=8),
+    horizon: int = typer.Option(
+        1, min=1, max=8, help="Gameweeks to optimise for. Default is the upcoming gameweek only."
+    ),
     budget: float = typer.Option(100.0, help="Budget in £m. Default is the official £100.0m."),
     refresh: bool = typer.Option(True, help="Refresh official FPL data before solving."),
     full: bool = typer.Option(False, help="Include per-player histories in the refresh."),
@@ -82,7 +92,10 @@ def wildcard(
     snapshot = _refresh_if_needed(refresh, full)
     projections = build_projections(snapshot, horizon=horizon, model_adjustments=load_model_adjustments())
     plan = solve_wildcard(projections, snapshot.rules, budget=tenths(budget))
-    print_squad_plan(plan, title=f"Wildcard · next {horizon} GW · £{budget:.1f}m")
+    gw = (snapshot.next_event() or {}).get("id")
+    span = f"GW{gw}" if horizon == 1 else f"GW{gw}–{(gw or 0) + horizon - 1}"
+    print_squad_plan(plan, title=f"Wildcard · {span} · £{budget:.1f}m")
+    print_trust_note(snapshot, plan, horizon=horizon)
     if csv:
         projections_frame(projections).to_csv(csv, index=False)
         console.print(f"Wrote projections to {csv}")
@@ -91,7 +104,9 @@ def wildcard(
 @app.command()
 def transfers(
     name: str = typer.Option("default", help="Saved squad name."),
-    horizon: int = typer.Option(4, min=1, max=8),
+    horizon: int = typer.Option(
+        1, min=1, max=8, help="Gameweeks to optimise for. Default is the upcoming gameweek only."
+    ),
     max_hits: int = typer.Option(1, min=0, max=5),
     refresh: bool = typer.Option(True),
     full: bool = typer.Option(False),
@@ -102,6 +117,51 @@ def transfers(
     projections = build_projections(snapshot, horizon=horizon, model_adjustments=load_model_adjustments())
     plan = solve_transfers(projections, snapshot.rules, squad, max_hits=max_hits)
     print_transfers(plan)
+    print_trust_note(snapshot, plan.wildcard, horizon=horizon)
+
+
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", help="Bind address. Use 0.0.0.0 to allow other devices."),
+    port: int = typer.Option(8000, min=1, max=65535),
+    open_browser: bool = typer.Option(True, "--open/--no-open", help="Open the UI in your browser."),
+) -> None:
+    """Start the local web UI for wildcard and transfer recommendations."""
+    import uvicorn
+
+    url = f"http://{'localhost' if host in {'127.0.0.1', '0.0.0.0'} else host}:{port}"
+    console.print(f"FPL Predictor UI on [bold]{url}[/bold]  (Ctrl+C to stop)")
+    if open_browser:
+        import threading
+        import webbrowser
+
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    uvicorn.run("fpl_predictor.web.api:app", host=host, port=port, log_level="warning")
+
+
+@app.command()
+def backtest(
+    season: str = typer.Option("2025-26", help="Season of historical gameweeks to walk through."),
+    start_gw: int = typer.Option(6, min=2, help="First gameweek to score, after some history exists."),
+    squads: bool = typer.Option(True, help="Also solve a legal 15 each GW and count its real points."),
+) -> None:
+    """Walk-forward test of the projection engine against form and price baselines."""
+    from fpl_predictor.data.warehouse import load_season
+    from fpl_predictor.eval.backtest import (
+        calibration_report,
+        official_ep_leakage,
+        prepare,
+        walk_forward,
+    )
+
+    data = prepare(load_season(season))
+    console.print(
+        f"{len(data)} player-gameweeks from {season}, "
+        f"GW{data['gw'].min()}–{data['gw'].max()}. Rebuilding projections gameweek by gameweek."
+    )
+    rules = load_current().rules if squads else None
+    summary, per_gw = walk_forward(data, start_gw=start_gw, rules=rules)
+    print_backtest(summary, per_gw, calibration=calibration_report(data), leakage=official_ep_leakage(data))
 
 
 @app.command()

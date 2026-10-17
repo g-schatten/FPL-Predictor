@@ -1,3 +1,10 @@
+"""Legacy form-and-FDR heuristic.
+
+Superseded by `models/engine.py`, which beat this by 0.058 NDCG@20 and ~8 actual points
+per gameweek in the walk-forward test (docs/EVAL.md). Kept only as the baseline that
+`fpl backtest` scores new work against; nothing in the live path calls it.
+"""
+
 from __future__ import annotations
 
 FDR_MULT = {1: 1.18, 2: 1.08, 3: 1.00, 4: 0.90, 5: 0.78}

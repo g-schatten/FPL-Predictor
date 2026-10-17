@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -8,10 +9,19 @@ import pandas as pd
 from fpl_predictor.data.rules import POSITIONS
 from fpl_predictor.data.snapshots import Snapshot
 from fpl_predictor.features.leakage import assert_no_leakage
-from fpl_predictor.models.minutes import availability, expected_minutes
-from fpl_predictor.models.points import project_gameweek_points
+from fpl_predictor.models.engine import PointsBreakdown, project_fixture
+from fpl_predictor.models.minutes import availability, minutes_profile
+from fpl_predictor.models.rates import accum_from_element, build_position_priors, build_rates
+from fpl_predictor.models.team_strength import (
+    build_league_context,
+    fdr_priors,
+    team_games_from_fixtures,
+    team_xg_from_players,
+)
 
-DEFAULT_WEIGHTS = (1.0, 0.8, 0.6, 0.4)
+# The upcoming gameweek is what the user is actually picking for. Later gameweeks only
+# break ties when a longer horizon is requested.
+DEFAULT_WEIGHTS = (1.0, 0.55, 0.4, 0.3, 0.25, 0.2, 0.15, 0.1)
 
 
 @dataclass
@@ -36,6 +46,8 @@ class PlayerProjection:
     risk_flags: list[str] = field(default_factory=list)
     can_select: bool = True
     selected_by: float = 0.0
+    breakdown: dict[str, float] = field(default_factory=dict)
+    opponents: list[str] = field(default_factory=list)
 
     @property
     def next_xpts(self) -> float:
@@ -74,10 +86,27 @@ def _upcoming_for_team(
     return grouped
 
 
+def build_league_view(snapshot: Snapshot):
+    """Team attack / defence strength for the current snapshot.
+
+    Official `teams[].strength` is null this season, so strength is estimated from finished
+    results and aggregated player xG, shrunk toward an FDR-based prior while samples are small.
+    """
+    players = snapshot.players()
+    teams = snapshot.teams_by_id()
+    games = team_games_from_fixtures(snapshot.fixtures)
+    played = Counter(game.team_id for game in games)
+    return build_league_context(
+        games,
+        xg_per_game=team_xg_from_players(players, dict(played)),
+        priors=fdr_priors(snapshot.fixtures, teams.keys()),
+    )
+
+
 def build_projections(
     snapshot: Snapshot,
     *,
-    horizon: int = 4,
+    horizon: int = 1,
     weights: tuple[float, ...] | None = None,
     model_adjustments: dict[int, float] | None = None,
 ) -> list[PlayerProjection]:
@@ -88,24 +117,66 @@ def build_projections(
 
     weight_row = weights or DEFAULT_WEIGHTS
     teams = snapshot.teams_by_id()
-    completed = [
-        e for e in snapshot.bootstrap.get("events", []) if e.get("finished") or e.get("data_checked")
-    ]
-    completed_count = max(1, len(completed))
+    league = build_league_view(snapshot)
     adjustments = model_adjustments or {}
 
+    raw_players = snapshot.players()
+    team_games = Counter(game.team_id for game in team_games_from_fixtures(snapshot.fixtures))
+    accums = {
+        int(raw["id"]): accum_from_element(raw, team_games=team_games.get(int(raw["team"]), 0))
+        for raw in raw_players
+    }
+    priors = build_position_priors(accums.values())
+
     projections: list[PlayerProjection] = []
-    for raw in snapshot.players():
+    for raw in raw_players:
         if not raw.get("can_select", True):
             continue
+        player_id = int(raw["id"])
         team_id = int(raw["team"])
         element_type = int(raw["element_type"])
         avail = availability(raw)
-        xmins = expected_minutes(raw, completed_gws=completed_count, history=snapshot.histories.get(str(raw["id"])))
-        ep_next = _to_float(raw.get("ep_next"))
-        form = _to_float(raw.get("form"))
+        rates = build_rates(accums[player_id], priors)
+        minutes = minutes_profile(
+            raw,
+            team_games=team_games.get(team_id, 0),
+            history=snapshot.histories.get(str(player_id)),
+        )
+
         fixtures_by_gw = _upcoming_for_team(snapshot.fixtures, team_id, start_event, horizon)
         xpts_by_gw: dict[int, float] = {}
+        next_breakdown: dict[str, float] = {}
+        opponents: list[str] = []
+
+        for offset in range(horizon):
+            event_id = start_event + offset
+            gw_points = 0.0
+            for fixture in fixtures_by_gw.get(event_id, []):
+                home = int(fixture.get("team_h") or 0) == team_id
+                opponent_id = int(fixture["team_a"] if home else fixture["team_h"])
+                result = project_fixture(
+                    rates,
+                    minutes,
+                    league,
+                    team_id=team_id,
+                    opponent_id=opponent_id,
+                    home=home,
+                )
+                gw_points += result.total
+                if offset == 0:
+                    opponents.append(
+                        f"{teams.get(opponent_id, {}).get('short_name', opponent_id)}"
+                        f"{' (H)' if home else ' (A)'}"
+                    )
+                    next_breakdown = result.as_dict()
+            xpts_by_gw[event_id] = gw_points
+
+        weighted = 0.0
+        for offset, pts in enumerate(xpts_by_gw.values()):
+            weight = weight_row[offset] if offset < len(weight_row) else weight_row[-1]
+            weighted += weight * pts
+        weighted *= 1.0 + adjustments.get(player_id, 0.0)
+
         flags: list[str] = []
         if raw.get("status") != "a":
             flags.append(f"status:{raw.get('status')}")
@@ -113,41 +184,14 @@ def build_projections(
             flags.append("news")
         if avail < 0.75:
             flags.append("avail<75")
-        if xmins < 45:
+        if minutes.p_long < 0.5:
             flags.append("minutes-risk")
-
-        for offset in range(horizon):
-            event_id = start_event + offset
-            fx = fixtures_by_gw.get(event_id, [])
-            if not fx:
-                xpts_by_gw[event_id] = 0.0
-                continue
-            gw_points = 0.0
-            for fixture in fx:
-                home = int(fixture.get("team_h") or 0) == team_id
-                fdr = int(fixture["team_h_difficulty"] if home else fixture["team_a_difficulty"])
-                first_horizon = offset == 0
-                gw_points += project_gameweek_points(
-                    ep_next=ep_next,
-                    form=form,
-                    availability=avail,
-                    xmins=xmins,
-                    fdr=fdr,
-                    home=home,
-                    use_official_ep=first_horizon,
-                )
-            xpts_by_gw[event_id] = gw_points
-
-        weighted = 0.0
-        for offset, (event_id, pts) in enumerate(xpts_by_gw.items()):
-            w = weight_row[offset] if offset < len(weight_row) else weight_row[-1]
-            weighted += w * pts
-        weighted *= 1.0 + adjustments.get(int(raw["id"]), 0.0)
-        weighted -= 0.35 * (1.0 - avail)
+        if not fixtures_by_gw.get(start_event):
+            flags.append("blank")
 
         projections.append(
             PlayerProjection(
-                player_id=int(raw["id"]),
+                player_id=player_id,
                 code=int(raw.get("code") or 0),
                 web_name=str(raw.get("web_name") or raw.get("second_name") or raw["id"]),
                 team_id=team_id,
@@ -157,16 +201,20 @@ def build_projections(
                 now_cost=int(raw["now_cost"]),
                 status=str(raw.get("status") or "a"),
                 news=str(raw.get("news") or ""),
-                chance_next=None if raw.get("chance_of_playing_next_round") is None else float(raw["chance_of_playing_next_round"]),
+                chance_next=None
+                if raw.get("chance_of_playing_next_round") is None
+                else float(raw["chance_of_playing_next_round"]),
                 availability=avail,
-                xmins=xmins,
-                ep_next=ep_next,
-                form=form,
+                xmins=minutes.expected,
+                ep_next=_to_float(raw.get("ep_next")),
+                form=_to_float(raw.get("form")),
                 xpts_by_gw=xpts_by_gw,
                 xpts=max(0.0, weighted),
                 risk_flags=flags,
                 can_select=bool(raw.get("can_select", True)),
                 selected_by=_to_float(raw.get("selected_by_percent")),
+                breakdown=next_breakdown,
+                opponents=opponents,
             )
         )
     return projections
@@ -188,7 +236,10 @@ def projections_frame(projections: list[PlayerProjection]) -> pd.DataFrame:
             "form": item.form,
             "status": item.status,
             "news": item.news,
+            "opponents": ", ".join(item.opponents),
         }
+        for key, value in item.breakdown.items():
+            row[f"x_{key}"] = value
         for gw, pts in item.xpts_by_gw.items():
             row[f"gw{gw}"] = round(pts, 2)
         rows.append(row)

@@ -36,3 +36,18 @@ def load_player_gw() -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError("No warehouse yet. Run `fpl train --download` first.")
     return pd.read_parquet(path)
+
+
+def load_season(season: str, *, download: bool = True) -> pd.DataFrame:
+    """One season of player-gameweek rows, cached on disk."""
+    dest = warehouse_dir() / f"merged_gw_{season}.csv"
+    if not dest.exists():
+        if not download:
+            raise FileNotFoundError(f"No local copy of {season}. Re-run with downloads enabled.")
+        with httpx.Client(timeout=120.0, headers={"User-Agent": USER_AGENT}, follow_redirects=True) as client:
+            response = client.get(f"{RAW_BASE}/{season}/gws/merged_gw.csv")
+            response.raise_for_status()
+            dest.write_bytes(response.content)
+    frame = pd.read_csv(dest)
+    frame["season"] = season
+    return frame
