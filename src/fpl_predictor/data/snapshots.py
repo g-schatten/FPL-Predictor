@@ -141,19 +141,30 @@ def load_current() -> Snapshot:
     return load_snapshot(Path(pointer.read_text(encoding="utf-8").strip()))
 
 
-def event_minutes(payload: dict[str, Any]) -> dict[str, list[int]]:
-    """{player id: minutes in each fixture} from one `/event/{gw}/live/` payload."""
-    return {
-        str(element["id"]): [
-            int(next((s.get("value", 0) for s in fixture.get("stats", []) if s.get("identifier") == "minutes"), 0))
-            for fixture in element.get("explain", [])
+def event_rows(payload: dict[str, Any]) -> dict[str, list[dict[str, float]]]:
+    """{player id: one row per fixture} from one `/event/{gw}/live/` payload.
+
+    Minutes come per fixture from `explain`. xG and xA are only published per gameweek, so a
+    double gameweek splits them evenly across its fixtures.
+    """
+    out: dict[str, list[dict[str, float]]] = {}
+    for element in payload.get("elements", []):
+        fixtures = element.get("explain", [])
+        stats = element.get("stats", {})
+        share = 1.0 / max(1, len(fixtures))
+        out[str(element["id"])] = [
+            {
+                "minutes": int(next((s.get("value", 0) for s in f.get("stats", []) if s.get("identifier") == "minutes"), 0)),
+                "xg": float(stats.get("expected_goals") or 0.0) * share,
+                "xa": float(stats.get("expected_assists") or 0.0) * share,
+            }
+            for f in fixtures
         ]
-        for element in payload.get("elements", [])
-    }
+    return out
 
 
 def live_histories(client: FplClient, bootstrap: dict[str, Any]) -> dict[str, Any]:
-    """Every player's minutes in every finished match, one request per gameweek.
+    """Every player's minutes, xG and xA in every finished match, one request per gameweek.
 
     Shaped like element-summary `history`, so `minutes_profile` runs the same decayed-history
     model the backtest scores instead of the season-aggregate fallback. `explain` has one
@@ -168,16 +179,16 @@ def live_histories(client: FplClient, bootstrap: dict[str, Any]) -> dict[str, An
         if not event.get("finished"):
             continue
         event_id = int(event["id"])
-        path = cache / f"{season}-gw{event_id:02d}.json"
+        path = cache / f"{season}-gw{event_id:02d}.v2.json"  # v2 rows carry xG and xA
         try:
-            minutes = _read_json(path)
+            per_player = _read_json(path)
         except (OSError, ValueError):  # not cached yet, or a write cut short: fetch again
-            minutes = event_minutes(client.event_live(event_id))
+            per_player = event_rows(client.event_live(event_id))
             if event.get("data_checked"):
-                _write_json(path, minutes)
-        for player_id, per_fixture in minutes.items():
+                _write_json(path, per_player)
+        for player_id, per_fixture in per_player.items():
             rows = histories.setdefault(player_id, {"history": []})["history"]
-            rows.extend({"round": event_id, "minutes": value} for value in per_fixture)
+            rows.extend({"round": event_id, **row} for row in per_fixture)
     return histories
 
 

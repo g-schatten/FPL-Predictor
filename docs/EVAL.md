@@ -32,7 +32,7 @@ results, lineups, and league-wide rates.
 
 | method | NDCG@10 | NDCG@20 | top-20 capture | MAE | XI+captain pts/GW | with autosubs |
 |---|---|---|---|---|---|---|
-| **engine (shipped)** | **0.372** | **0.391** | **0.402** | **0.969** | **58.8** | **62.4** |
+| **engine (shipped)** | **0.373** | **0.394** | **0.408** | **0.968** | **59.3** | **62.6** |
 | legacy heuristic (form × FDR × minutes) | 0.303 | 0.330 | 0.345 | 0.995 | 50.2 | 53.8 |
 | last-4-GW points per 90 × minutes | 0.284 | 0.310 | 0.330 | 1.031 | 49.0 | 52.5 |
 | price | 0.272 | 0.289 | 0.299 | 48.08 | 37.5 | 38.7 |
@@ -41,7 +41,7 @@ results, lineups, and league-wide rates.
 
 | method | NDCG@10 | NDCG@20 | top-20 capture | MAE | XI+captain pts/GW | with autosubs |
 |---|---|---|---|---|---|---|
-| **engine (shipped)** | **0.401** | **0.414** | **0.421** | **1.045** | **64.6** | **66.8** |
+| **engine (shipped)** | **0.411** | **0.418** | **0.423** | **1.043** | **66.2** | **68.5** |
 | legacy heuristic | 0.354 | 0.360 | 0.367 | 1.065 | 54.6 | 56.3 |
 | last-4-GW points per 90 × minutes | 0.338 | 0.352 | 0.363 | 1.102 | 53.7 | 55.5 |
 | price | 0.333 | 0.348 | 0.366 | 47.31 | 46.0 | 47.4 |
@@ -84,7 +84,8 @@ Comparing against live `ep_next` requires accumulating pre-deadline snapshots go
 
 Per player, per fixture, all from the official API:
 
-- **Attacking**: xG and xA per 90, shrunk toward the position median by 320 pseudo-minutes,
+- **Attacking**: xG and xA per 90, with each match capped at 1.0 xG and 1.0 xA, shrunk toward
+  the position median by 320 pseudo-minutes,
   scaled by how good this specific fixture looks for the team.
 - **Team strength**: attack and defence indices from finished results plus aggregated player
   xG (keeper xGC for defence), shrunk toward an FDR-derived prior.
@@ -221,6 +222,22 @@ minutes profiles. Backtest scored with history vs the old live fallback:
 A player registered within the last two finished gameweeks with no minutes keeps the signing
 guess (45 minutes when fit and £4.5m+); three or more blank rows while fit now project 0.
 
+**Per-match xG/xA cap** (`models/rates.py` `MATCH_CAP = 1.0`, live via per-gameweek xG from
+`/event/{gw}/live/`). A season-long rate let one game dominate: in 2026-27 Bruno Fernandes had
+2.02 of his 2.66 xG in GW2 (penalties), then 0.64 in six games, and still ranked 3rd among
+midfielders. Each match now adds at most 1.0 xG and 1.0 xA. He drops to 11th.
+
+| cap | 2025-26 NDCG@10 / NDCG@20 / top-20 / squad | 2024-25 NDCG@10 / NDCG@20 / top-20 / squad |
+|---|---|---|
+| 0.5 | −0.0115 / +0.0015 / +0.0162 / −0.09 | −0.0016 / +0.0005 / −0.0019 / +1.88 |
+| 0.75 | −0.0001 / +0.0037 / +0.0100 / +0.15 | +0.0086 / +0.0031 / +0.0012 / +1.58 |
+| **1.0** | **+0.0007 / +0.0028 / +0.0057 / +0.18** | **+0.0098 / +0.0043 / +0.0017 / +1.79** |
+| 1.5 | +0.0003 / +0.0017 / +0.0034 / +0.64 | +0.0054 / +0.0028 / +0.0008 / +1.42 |
+
+1.0 is the only value positive on every gate metric in both seasons. Its lower neighbour misses
+one metric by 0.0001 (noise); the upper neighbour passes. Double gameweeks split the live
+per-gameweek xG evenly across fixtures, because the live endpoint does not publish it per match.
+
 ### Tested and cut
 
 These come from pilot scripts that call the same `eval/backtest.py` functions (not committed).
@@ -236,6 +253,11 @@ These come from pilot scripts that call the same `eval/backtest.py` functions (n
   variant was better on all four gate metrics; live stays on FDR, the backtest on no prior.
   The opponent fit gave NDCG@20 −0.0009 and XI+captain −0.36. Priors help in GW2–5 only;
   retest that window (with Club Elo) when 2026-27 is in the archive.
+- **Recent form, retested on the current engine** (2026-10-23, after the user saw a one-haul
+  player keep getting picked). Blending recent points per 90 at 0.05 / 0.1 / 0.15 and recency
+  weighting rates with half-lives of 38 / 20 / 12 matches. On 2025-26 every variant lost NDCG@10
+  (−0.003 to −0.007) and squad points (−0.06 to −1.39); 2024-25 was mixed. The real problem was
+  one outlier match, which the per-match cap fixes without discarding the rest of the season.
 - **Negative-binomial DC** (dispersion 10/20/40): NDCG@20 0.3908/0.3908/0.3899 vs 0.3911 Poisson.
 - **Vice-captain weight in the objective**: the vice is already the second-best starter.
 - **Transfers-mode defaults**: an 8-week transfer simulator from four wildcard starts was too

@@ -14,6 +14,7 @@ from fpl_predictor.models.minutes import DECAY_HALF_LIFE
 from fpl_predictor.models.points import project_gameweek_points
 from fpl_predictor.models.rates import (
     PlayerAccum,
+    MATCH_CAP,
     PositionPriors,
     build_position_priors,
     build_rates,
@@ -51,6 +52,7 @@ class EngineConfig:
     prior_games: float = PRIOR_GAMES
     xg_weight: float = XG_WEIGHT
     rate_half_life: float | None = None  # None = weight every completed match equally
+    match_cap: float | None = MATCH_CAP  # per-match xG/xA cap; None = no cap
     minutes_half_life: float = DECAY_HALF_LIFE
     points_blend: float = 0.0  # weight on the player's own recent points per 90
     name: str | None = None
@@ -118,7 +120,9 @@ def _decay_weights(count: int, half_life: float | None = DECAY_HALF_LIFE) -> np.
     return 0.5 ** (offsets / half_life)
 
 
-def accums_from_history(history: pd.DataFrame, *, half_life: float | None = None) -> dict[int, PlayerAccum]:
+def accums_from_history(
+    history: pd.DataFrame, *, half_life: float | None = None, match_cap: float | None = None
+) -> dict[int, PlayerAccum]:
     """Per-player accumulators over completed matches, optionally recency weighted.
 
     Weights are renormalised to keep the sample size at "matches played", so recency
@@ -139,8 +143,8 @@ def accums_from_history(history: pd.DataFrame, *, half_life: float | None = None
             minutes=wtotal("minutes"),
             appearances=float(np.sum(weights * (minutes > 0))),
             starts=wtotal("starts"),
-            xg=wtotal("xg"),
-            xa=wtotal("xa"),
+            xg=float(np.sum(weights * rows["xg"].clip(upper=match_cap).to_numpy())),
+            xa=float(np.sum(weights * rows["xa"].clip(upper=match_cap).to_numpy())),
             bonus=wtotal("bonus"),
             dc=wtotal("dc"),
             saves=wtotal("saves"),
@@ -213,21 +217,23 @@ class GameweekState:
     gw: int
     history: pd.DataFrame
     target: pd.DataFrame
-    _accums: dict[float | None, dict[int, PlayerAccum]] = field(default_factory=dict)
-    _priors: dict[float | None, PositionPriors] = field(default_factory=dict)
+    _accums: dict[tuple, dict[int, PlayerAccum]] = field(default_factory=dict)
+    _priors: dict[tuple, PositionPriors] = field(default_factory=dict)
     _leagues: dict[tuple[float, float], LeagueContext] = field(default_factory=dict)
     _minutes: dict[float, dict[int, MinutesProfile]] = field(default_factory=dict)
     _points90: dict[int, float] | None = None
 
-    def accums(self, half_life: float | None) -> dict[int, PlayerAccum]:
-        if half_life not in self._accums:
-            self._accums[half_life] = accums_from_history(self.history, half_life=half_life)
-        return self._accums[half_life]
+    def accums(self, half_life: float | None, match_cap: float | None = None) -> dict[int, PlayerAccum]:
+        key = (half_life, match_cap)
+        if key not in self._accums:
+            self._accums[key] = accums_from_history(self.history, half_life=half_life, match_cap=match_cap)
+        return self._accums[key]
 
-    def priors(self, half_life: float | None) -> PositionPriors:
-        if half_life not in self._priors:
-            self._priors[half_life] = build_position_priors(self.accums(half_life).values())
-        return self._priors[half_life]
+    def priors(self, half_life: float | None, match_cap: float | None = None) -> PositionPriors:
+        key = (half_life, match_cap)
+        if key not in self._priors:
+            self._priors[key] = build_position_priors(self.accums(half_life, match_cap).values())
+        return self._priors[key]
 
     def league(self, prior_games: float, xg_weight: float) -> LeagueContext:
         key = (prior_games, xg_weight)
@@ -258,8 +264,8 @@ class GameweekState:
 
 def engine_predictions(state: GameweekState, config: EngineConfig) -> np.ndarray:
     league = state.league(config.prior_games, config.xg_weight)
-    accums = state.accums(config.rate_half_life)
-    priors = state.priors(config.rate_half_life)
+    accums = state.accums(config.rate_half_life, config.match_cap)
+    priors = state.priors(config.rate_half_life, config.match_cap)
     minutes = state.minutes(config.minutes_half_life)
     points90 = state.points_per_90() if config.points_blend > 0 else {}
 

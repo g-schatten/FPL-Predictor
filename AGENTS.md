@@ -38,7 +38,8 @@ Checked 2026-09-13:
 
 `models/engine.py` is the live projection engine. Per player-fixture it combines:
 
-- per-90 xG, xA, bonus, defensive actions, saves and cards, shrunk toward position medians
+- per-90 xG, xA, bonus, defensive actions, saves and cards, shrunk toward position medians;
+  each match adds at most 1.0 xG / 1.0 xA so one outlier game cannot dominate
 - team attack/defence indices from finished results and aggregated xG (`models/team_strength.py`),
   shrunk toward an FDR prior because `teams[].strength` is null
 - expected goals for and against for that exact fixture, then Poisson tails for clean sheets,

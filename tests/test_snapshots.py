@@ -83,10 +83,10 @@ def test_a_truncated_cache_file_is_fetched_again(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FPL_HOME", str(tmp_path))
     cache = tmp_path / "data" / "snapshots" / "live"
     cache.mkdir(parents=True)
-    (cache / "2026-gw01.json").write_text('{"7": [9', encoding="utf-8")  # Ctrl+C mid-write
+    (cache / "2026-gw01.v2.json").write_text('{"7": [9', encoding="utf-8")  # Ctrl+C mid-write
     events = [{"id": 1, "finished": True, "data_checked": True, "deadline_time": "2026-08-21T17:30:00Z"}]
     client = _FakeClient({1: _live([90])})
-    assert live_histories(client, {"events": events})["7"]["history"] == [{"round": 1, "minutes": 90}]
+    assert live_histories(client, {"events": events})["7"]["history"] == [{"round": 1, "minutes": 90, "xg": 0.0, "xa": 0.0}]
     assert client.calls == [1]
 
 
@@ -98,3 +98,14 @@ def test_a_new_signing_without_minutes_keeps_the_rotation_guess() -> None:
     unused = minutes_profile(player, team_games=21, history={"history": [{"round": gw, "minutes": 0} for gw in (19, 20, 21)]})
     assert signed.expected == 45.0  # one blank row since registering: today's guess
     assert unused.expected == 0.0  # three blanks while fit: he is not being picked
+
+
+def test_one_outlier_match_cannot_dominate_season_xg() -> None:
+    from fpl_predictor.models.rates import PlayerAccum, cap_match_outliers
+
+    accum = PlayerAccum(element_type=3, minutes=630, appearances=7, starts=7, xg=2.66, xa=1.5,
+                        bonus=3, dc=0, saves=0, yellow_cards=0)
+    history = {"history": [{"xg": 2.02, "xa": 0.48}] + [{"xg": 0.1, "xa": 0.17}] * 6}
+    capped = cap_match_outliers(accum, history)
+    assert round(capped.xg, 2) == 1.64  # 2.02 counts as 1.0
+    assert capped.xa == 1.5  # no match above the cap

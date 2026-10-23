@@ -15,6 +15,10 @@ PRIOR_MINUTES = {
     "defence": 220.0,
     "bonus": 260.0,
 }
+# No single match may add more than this much xG (or xA) to a player's season total. One
+# penalty-laden game otherwise dominates a short season: walk-forward NDCG and squad points
+# improved on both 2025-26 and 2024-25 (docs/EVAL.md).
+MATCH_CAP = 1.0
 MIN_MINUTES_FOR_PRIOR = 450  # who counts as an established player when building priors
 
 
@@ -158,3 +162,11 @@ def accum_from_element(player: dict[str, Any], *, team_games: int) -> PlayerAccu
         long_starts=starts,  # bootstrap cannot tell a 60' start from a 90'; starts is the signal
         xgc=_float(player.get("expected_goals_conceded")),
     )
+
+
+def cap_match_outliers(accum: PlayerAccum, history: dict[str, Any] | None, cap: float = MATCH_CAP) -> PlayerAccum:
+    """Remove each match's xG and xA above `cap` from season totals built from `bootstrap-static`."""
+    rows = (history or {}).get("history") or []
+    accum.xg = max(0.0, accum.xg - sum(max(0.0, _float(row.get("xg")) - cap) for row in rows))
+    accum.xa = max(0.0, accum.xa - sum(max(0.0, _float(row.get("xa")) - cap) for row in rows))
+    return accum

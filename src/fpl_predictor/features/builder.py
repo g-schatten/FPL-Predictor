@@ -11,7 +11,12 @@ from fpl_predictor.data.snapshots import Snapshot
 from fpl_predictor.features.leakage import assert_no_leakage
 from fpl_predictor.models.engine import PointsBreakdown, project_fixture
 from fpl_predictor.models.minutes import availability, minutes_profile
-from fpl_predictor.models.rates import accum_from_element, build_position_priors, build_rates
+from fpl_predictor.models.rates import (
+    accum_from_element,
+    build_position_priors,
+    build_rates,
+    cap_match_outliers,
+)
 from fpl_predictor.models.team_strength import (
     build_league_context,
     fdr_priors,
@@ -123,7 +128,10 @@ def build_projections(
     raw_players = snapshot.players()
     team_games = Counter(game.team_id for game in team_games_from_fixtures(snapshot.fixtures))
     accums = {
-        int(raw["id"]): accum_from_element(raw, team_games=team_games.get(int(raw["team"]), 0))
+        int(raw["id"]): cap_match_outliers(
+            accum_from_element(raw, team_games=team_games.get(int(raw["team"]), 0)),
+            snapshot.histories.get(str(raw["id"])),
+        )
         for raw in raw_players
     }
     priors = build_position_priors(accums.values())
