@@ -12,6 +12,9 @@ def test_index_serves_dark_ui() -> None:
     assert response.status_code == 200
     assert "FPL Predictor" in response.text
     assert "/static/styles.css" in response.text
+    # Home links to the predictor, which offers both modes; the manager ID can be remembered.
+    for anchor in ('href="#predict"', 'href="#predict/transfers"', 'href="#predict/wildcard"', 'id="tr-remember"'):
+        assert anchor in response.text
 
 
 def test_state_never_fetches_on_page_load() -> None:

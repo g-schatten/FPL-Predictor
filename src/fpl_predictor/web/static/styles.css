@@ -84,27 +84,24 @@ main {
 
 .result { display: grid; gap: 16px; }
 
-/* Tabs */
-.tabs {
-  display: flex;
-  gap: 4px;
-  margin: 16px 0 18px;
-  border-bottom: 1px solid var(--line-soft);
-}
+/* Home */
+.brand { color: inherit; text-decoration: none; }
+.view { display: grid; gap: 16px; margin-top: 16px; }
+.hero { padding: 40px 32px; text-align: center; }
+.hero h2 { margin: 0 0 10px; font-size: 28px; letter-spacing: -0.02em; }
+.hero p { margin: 0 auto 24px; max-width: 620px; color: var(--muted); font-size: 15px; }
+.btn.big { display: inline-block; padding: 13px 26px; font-size: 15px; text-decoration: none; }
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.steps p { margin: 6px 0 0; color: var(--muted); }
 
-.tab {
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--muted);
-  font: inherit;
-  font-weight: 550;
-  padding: 10px 14px;
-  cursor: pointer;
-}
-
-.tab:hover { color: var(--text); }
-.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+/* Predictor mode choice */
+.mode-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.mode-card { color: inherit; text-decoration: none; transition: border-color 0.15s ease; }
+.mode-card h3 { margin: 0 0 6px; font-size: 16px; }
+.mode-card p { margin: 0; color: var(--muted); }
+.mode-card:hover { border-color: var(--line); }
+.mode-card.active { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+@media (max-width: 760px) { .steps, .mode-cards { grid-template-columns: 1fr; } }
 
 /* Controls */
 .controls {
@@ -160,31 +157,6 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 .btn.ghost { background: transparent; color: var(--muted); }
 .btn.ghost:hover { color: var(--text); }
 .btn:disabled { opacity: 0.5; cursor: default; }
-
-/* Segmented control */
-.segmented {
-  display: inline-flex;
-  gap: 2px;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 3px;
-  align-self: flex-start;
-}
-
-.seg {
-  border: none;
-  background: none;
-  color: var(--muted);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 550;
-  padding: 7px 13px;
-  border-radius: 7px;
-  cursor: pointer;
-}
-
-.seg.active { background: var(--surface); color: var(--text); }
 
 /* Pills */
 .pill {

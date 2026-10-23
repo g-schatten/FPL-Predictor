@@ -1,7 +1,14 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-const state = { squads: [], mode: "entry" };
+// The manager ID lives in this browser only; storage can be blocked, so never let it throw.
+const ID_KEY = "fpl.managerId";
+function savedId() {
+  try { return localStorage.getItem(ID_KEY) || ""; } catch { return ""; }
+}
+function rememberId(id) {
+  try { id ? localStorage.setItem(ID_KEY, id) : localStorage.removeItem(ID_KEY); } catch { /* private mode */ }
+}
 
 /* ---------- helpers ---------- */
 
@@ -82,25 +89,6 @@ function renderSnapshot(snapshot) {
   pill.className = "pill";
   pill.innerHTML = `<b>GW${esc(snapshot.next_gw ?? "?")}</b> deadline ${esc(deadlineText(snapshot.next_deadline))}
     &nbsp;·&nbsp; ${esc(snapshot.injured)} injured &nbsp;·&nbsp; data ${esc(agoText(snapshot.pulled_at))}`;
-}
-
-function renderSquadOptions() {
-  const select = $("#tr-saved");
-  if (!state.squads.length) {
-    select.innerHTML = `<option value="">No saved squads yet</option>`;
-    return;
-  }
-  select.innerHTML = state.squads
-    .map((squad) => `<option value="${esc(squad.name)}">${esc(squad.name)} · bank ${money(squad.bank)}</option>`)
-    .join("");
-  if (state.mode === "saved") applySavedSquadDefaults();
-}
-
-function applySavedSquadDefaults() {
-  const chosen = state.squads.find((squad) => squad.name === $("#tr-saved").value);
-  if (!chosen) return;
-  $("#tr-bank").value = chosen.bank.toFixed(1);
-  $("#tr-ft").value = String(Math.min(5, Math.max(0, chosen.free_transfers)));
 }
 
 /* ---------- squad rendering ---------- */
@@ -221,9 +209,7 @@ function newsCard(snapshot) {
 async function loadState() {
   try {
     const data = await callApi("/api/state");
-    state.squads = data.squads || [];
     renderSnapshot(data.snapshot);
-    renderSquadOptions();
   } catch (error) {
     showError(error.message);
   }
@@ -233,9 +219,7 @@ async function refreshData() {
   busy(true, "Fetching latest prices and injuries…");
   try {
     const data = await callApi("/api/refresh", {});
-    state.squads = data.squads || [];
     renderSnapshot(data.snapshot);
-    renderSquadOptions();
     showError("");
   } catch (error) {
     showError(error.message);
@@ -249,7 +233,6 @@ async function runWildcard() {
   showError("");
   try {
     const data = await callApi("/api/wildcard", {
-      horizon: Number($("#wc-horizon").value),
       budget: Number($("#wc-budget").value),
       refresh: $("#wc-refresh").checked,
     });
@@ -279,32 +262,21 @@ async function runWildcard() {
 
 async function runTransfers() {
   const body = {
-    horizon: Number($("#tr-horizon").value),
     max_hits: Number($("#tr-hits").value),
     bank: Number($("#tr-bank").value),
     free_transfers: Number($("#tr-ft").value),
     refresh: true,
   };
 
-  if (state.mode === "entry") {
-    const entry = Number($("#tr-entry").value);
-    if (!entry) return showError("Enter your FPL manager ID first.");
-    body.entry_id = entry;
-  } else if (state.mode === "ids") {
-    const ids = $("#tr-ids").value.split(/[^0-9]+/).filter(Boolean).map(Number);
-    if (ids.length !== 15) return showError(`Need exactly 15 player IDs — got ${ids.length}.`);
-    body.player_ids = ids;
-  } else {
-    const name = $("#tr-saved").value;
-    if (!name) return showError("No saved squad yet. Use manager ID or player IDs first.");
-    body.squad_name = name;
-  }
+  const entry = Number($("#tr-entry").value);
+  if (!entry) return showError("Enter your FPL manager ID first.");
+  body.entry_id = entry;
+  rememberId($("#tr-remember").checked ? String(entry) : "");
 
   busy(true, "Reading your squad, then solving transfers…");
   showError("");
   try {
     const data = await callApi("/api/transfers", body);
-    state.squads = data.squads || state.squads;
     renderSnapshot(data.snapshot);
     const result = data.result;
     const moves = result.moves.length
@@ -357,28 +329,23 @@ async function runTransfers() {
 
 /* ---------- wiring ---------- */
 
-$$(".tab").forEach((tab) => {
-  tab.addEventListener("click", () => {
-    $$(".tab").forEach((other) => other.classList.toggle("active", other === tab));
-    $("#panel-wildcard").hidden = tab.dataset.tab !== "wildcard";
-    $("#panel-transfers").hidden = tab.dataset.tab !== "transfers";
-  });
-});
+// #home, #predict, #predict/transfers, #predict/wildcard. The hash keeps the back button working.
+function route() {
+  const [view, mode] = location.hash.replace(/^#/, "").split("/");
+  const predict = view === "predict";
+  $("#view-home").hidden = predict;
+  $("#view-predict").hidden = !predict;
+  $$(".mode-card").forEach((card) => card.classList.toggle("active", card.dataset.mode === mode));
+  $("#panel-transfers").hidden = mode !== "transfers";
+  $("#panel-wildcard").hidden = mode !== "wildcard";
+  showError("");
+}
 
-$$(".seg").forEach((seg) => {
-  seg.addEventListener("click", () => {
-    state.mode = seg.dataset.mode;
-    $$(".seg").forEach((other) => other.classList.toggle("active", other === seg));
-    $$("[data-mode-panel]").forEach((panel) => {
-      panel.hidden = panel.dataset.modePanel !== state.mode;
-    });
-    if (state.mode === "saved") applySavedSquadDefaults();
-  });
-});
-
-$("#tr-saved").addEventListener("change", applySavedSquadDefaults);
+window.addEventListener("hashchange", route);
 $("#refresh-btn").addEventListener("click", refreshData);
 $("#wc-run").addEventListener("click", runWildcard);
 $("#tr-run").addEventListener("click", runTransfers);
 
+$("#tr-entry").value = savedId();
+route();
 loadState();
