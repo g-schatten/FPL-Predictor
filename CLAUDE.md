@@ -65,6 +65,10 @@ python -m pytest -q
 - Do not claim a projection change is better without `fpl backtest` beating the form and price baselines on NDCG / top-k and on solved-squad points.
 - Tests live in `tests/`. Run `python -m pytest -q` after a behavior change.
 
+## Weekly update
+
+In this repo, "do the weekly update" means the `fpl-weekly` project skill (`.claude/skills/fpl-weekly/`), not the thesis check-in. Plan, backlog and log: `docs/WEEKLY.md`.
+
 ## Working tree
 
-One commit exists (`Add local FPL wildcard and transfer CLI`). The web UI, projection engine, and backtest are local changes on top of that commit and are not committed. Read `git status` before assuming `HEAD` is the product. Do not commit unless asked.
+The engine, web UI and backtest are committed and pushed to `origin/main`. Read `git status` before assuming `HEAD` is the product. Do not commit unless asked.
